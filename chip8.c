@@ -5,7 +5,6 @@
 #include "defs.h"
 
 uint16_t opcode;
-
 uint8_t keys[16];
 
 uint8_t set_fonts[5 * 16] = {
@@ -26,387 +25,338 @@ uint8_t set_fonts[5 * 16] = {
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80  // F
 };
-	
-static architecture *Arch = NULL;
-static size_t rom_size = 0;
-static int draw_flag = 0;
 
-void load_roms(char *filename, architecture* Arch){
-	FILE *file = fopen(filename, "rb");
-	if (file == NULL){
-		printf("\nError while opening file");
-		exit(-1);
-	}
+architecture *Arch = NULL;
+size_t rom_size = 0;
+int draw_flag = 0;
 
-	int offset = 0x200; 
+void load_roms(char *filename, architecture* Arch) {
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        printf("\nError while opening file");
+        exit(-1);
+    }
 
-	while (fread(Arch->main_memory + offset, 1, 1, file) == 1) {
-		
-		if (offset >= 4096) {
-			printf("\nError: File capacity reached (Max 4096 bytes exceeded)");
-			fclose(file);
-			exit(-1);
-		}
+    int offset = 0x200; 
 
-		offset = offset + 1;
-		rom_size = rom_size + 1;
-	}
+    while (fread(Arch->main_memory + offset, 1, 1, file) == 1) {
+        if (offset >= 4096) {
+            printf("\nError: File capacity reached (Max 4096 bytes exceeded)");
+            fclose(file);
+            exit(-1);
+        }
+        offset++;
+        rom_size++;
+    }
 
-	fclose(file); 
-	printf("\nLoaded ROM's into main memory :)");
+    fclose(file); 
+    printf("\nLoaded ROM into main memory :)");
 }
 
+void initialize_chip8(char *filename) {
+    srand((unsigned int)time(NULL));
 
-void initialize_chip8(char *filename){
     Arch = (architecture*)malloc(sizeof(architecture));
     if (Arch == NULL) {
         printf("\nError: Architecture memory allocation failed");
         exit(-1);
     }
 
-	Arch->PC = 0x200;
-	Arch->SP = 0;
-	Arch->IR = 0;
-	opcode = 0;
+    memset(Arch->main_memory, 0, sizeof(Arch->main_memory));
+    memset(Arch->v, 0, sizeof(Arch->v));
+    memset(Arch->stack, 0, sizeof(Arch->stack));
+    memset(Arch->frame_buffer, 0, sizeof(Arch->frame_buffer));
+    memset(keys, 0, sizeof(keys));
 
-	for(int i = 0; i < 80; i++){
-		Arch->main_memory[i] = set_fonts[i];
-	}
+    Arch->PC = 0x200;
+    Arch->SP = 0;
+    Arch->IR = 0;
+    opcode = 0;
 
-	Arch->delay_timer = 0;
-	Arch->sound_timer = 0;
+    for (int i = 0; i < 80; i++) {
+        Arch->main_memory[i] = set_fonts[i];
+    }
 
-	printf("\nChip8 hardware and architecture Up and Ready :)");
+    Arch->delay_timer = 0;
+    Arch->sound_timer = 0;
 
-	load_roms(filename, Arch);
+    printf("\nChip8 hardware and architecture Up and Ready :)");
+    load_roms(filename, Arch);
 }
 
-void emulate_cycle(){
-	if (Arch->PC != 0x200 + rom_size){
-		opcode = (Arch->main_memory[Arch->PC] << 8) | (Arch->main_memory[Arch->PC + 1]);
-		printf("\nAddr [0x%03X]: 0x%04X", Arch->PC, opcode);
+void emulate_cycle(void) {
+    if (Arch->PC < 4096 - 1) {
+        opcode = (Arch->main_memory[Arch->PC] << 8) | (Arch->main_memory[Arch->PC + 1]);
 
-		switch (opcode & 0xF000){
-			case (0x0000):{
-				switch (opcode & 0x00FF){
-					case (0x00E0):{
-						memset(Arch->frame_buffer, 0, sizeof(32 * 64));
-						draw_flag = 1;
-						Arch->PC = Arch->PC + 2;
+        switch (opcode & 0xF000) {
+            case 0x0000: {
+                switch (opcode & 0x00FF) {
+                    case 0x00E0: {
+                        memset(Arch->frame_buffer, 0, 64 * 32);
+                        draw_flag = 1;
+                        Arch->PC += 2;
+                        break;
+                    }
+                    case 0x00EE: {
+                        if (Arch->SP > 0) {
+                            Arch->SP--;
+                            Arch->PC = Arch->stack[Arch->SP];
+                        }
+                        Arch->PC += 2;
+                        break;
+                    }
+                    default:
+                        Arch->PC += 2;
+                        break;
+                }
+                break;
+            }
+            case 0x1000: {
+                Arch->PC = (opcode & 0x0FFF);
+                break;
+            }
+            case 0x2000: {
+                Arch->stack[Arch->SP] = Arch->PC;
+                Arch->SP++;
+                Arch->PC = (opcode & 0x0FFF);
+                break;
+            }
+            case 0x3000: {
+                if (Arch->v[(opcode & 0x0F00) >> 8] == (opcode & 0x00FF)) {
+                    Arch->PC += 4;
+                } else {
+                    Arch->PC += 2;
+                }
+                break;
+            }
+            case 0x4000: {
+                if (Arch->v[(opcode & 0x0F00) >> 8] != (opcode & 0x00FF)) {
+                    Arch->PC += 4;
+                } else {
+                    Arch->PC += 2;
+                }
+                break;
+            }
+            case 0x5000: {
+                if (Arch->v[(opcode & 0x0F00) >> 8] == Arch->v[(opcode & 0x00F0) >> 4]) {
+                    Arch->PC += 4;
+                } else {
+                    Arch->PC += 2;
+                }
+                break;
+            }
+            case 0x6000: {
+                Arch->v[(opcode & 0x0F00) >> 8] = (opcode & 0x00FF);
+                Arch->PC += 2;
+                break;
+            }
+            case 0x7000: {
+                Arch->v[(opcode & 0x0F00) >> 8] += (opcode & 0x00FF);
+                Arch->PC += 2;
+                break;
+            }
+            case 0x8000: {
+                uint8_t x = (opcode & 0x0F00) >> 8;
+                uint8_t y = (opcode & 0x00F0) >> 4;
 
-						break;
-					}
-					case (0x00EE):{
-						Arch->PC = Arch->stack[Arch->SP - 1];
-						Arch->SP = Arch->SP - 1;
-						Arch->PC = Arch->PC + 2;
+                switch (opcode & 0x000F) {
+                    case 0x0000:
+                        Arch->v[x] = Arch->v[y];
+                        break;
+                    case 0x0001:
+                        Arch->v[x] |= Arch->v[y];
+                        break;
+                    case 0x0002:
+                        Arch->v[x] &= Arch->v[y];
+                        break;
+                    case 0x0003:
+                        Arch->v[x] ^= Arch->v[y];
+                        break;
+                    case 0x0004: {
+                        uint16_t sum = Arch->v[x] + Arch->v[y];
+                        uint8_t carry = (sum > 0xFF) ? 1 : 0;
+                        Arch->v[x] = sum & 0xFF;
+                        Arch->v[0xF] = carry;
+                        break;
+                    }
+                    case 0x0005: {
+                        uint8_t borrow = (Arch->v[x] >= Arch->v[y]) ? 1 : 0;
+                        Arch->v[x] -= Arch->v[y];
+                        Arch->v[0xF] = borrow;
+                        break;
+                    }
+                    case 0x0006: {
+                        uint8_t lsb = Arch->v[x] & 0x1;
+                        Arch->v[x] >>= 1;
+                        Arch->v[0xF] = lsb;
+                        break;
+                    }
+                    case 0x0007: {
+                        uint8_t borrow = (Arch->v[y] >= Arch->v[x]) ? 1 : 0;
+                        Arch->v[x] = Arch->v[y] - Arch->v[x];
+                        Arch->v[0xF] = borrow;
+                        break;
+                    }
+                    case 0x000E: {
+                        uint8_t msb = (Arch->v[x] & 0x80) >> 7;
+                        Arch->v[x] <<= 1;
+                        Arch->v[0xF] = msb;
+                        break;
+                    }
+                }
+                Arch->PC += 2;
+                break;
+            }
+            case 0x9000: {
+                if ((opcode & 0x000F) == 0x0000) {
+                    if (Arch->v[(opcode & 0x0F00) >> 8] != Arch->v[(opcode & 0x00F0) >> 4]) {
+                        Arch->PC += 4;
+                    } else {
+                        Arch->PC += 2;
+                    }
+                }
+                break;
+            }
+            case 0xA000: {
+                Arch->IR = (opcode & 0x0FFF);
+                Arch->PC += 2;
+                break;
+            }
+            case 0xB000: {
+                Arch->PC = (opcode & 0x0FFF) + Arch->v[0x0];
+                break;
+            }
+            case 0xC000: {
+                uint8_t random_byte = rand() & 0xFF;
+                Arch->v[(opcode & 0x0F00) >> 8] = random_byte & (opcode & 0x00FF);
+                Arch->PC += 2;
+                break;
+            }
+            case 0xD000: {
+                uint8_t x = Arch->v[(opcode & 0x0F00) >> 8] % 64;
+                uint8_t y = Arch->v[(opcode & 0x00F0) >> 4] % 32;
+                uint8_t height = (opcode & 0x000F);
 
-						break;
-					}
-					default:{
-						printf("\nUnknown opcode !");
-						Arch->PC = Arch->PC + 2;
+                Arch->v[0xF] = 0;
 
-						break;
-					}
-				}
-			}
-			case (0x1000):{
-				Arch->PC = (opcode & 0x0FFF);
+                for (int sprite_row = 0; sprite_row < height; sprite_row++) {
+                    if (y + sprite_row >= 32) break; // Clip bottom
 
-				break;
-			}
-			case (0x2000):{
-				Arch->stack[Arch->SP] = Arch->PC;
-				Arch->SP = Arch->SP + 1;
-				Arch->PC = (opcode & 0x0FFF);
+                    uint8_t pixel = Arch->main_memory[Arch->IR + sprite_row];
 
-				break;
-			} 
-			case (0x3000):{
-				if (Arch->v[(opcode & 0x0F00) >> 8] == (opcode & 0x00FF)){
-					Arch->PC = Arch->PC + 4;
-				} else {
-					Arch->PC = Arch->PC + 2;
-				}
+                    for (int sprite_col = 0; sprite_col < 8; sprite_col++) {
+                        if (x + sprite_col >= 64) break; // Clip right
 
-				break;
-			}
-			case (0x4000):{
-				if (Arch->v[(opcode & 0x0F00) >> 8] != (opcode & 0x00FF)){
-					Arch->PC = Arch->PC + 4;
-				} else {
-					Arch->PC = Arch->PC + 2;
-				}
+                        if ((pixel & (0x80 >> sprite_col)) != 0) {
+                            int in_screen_pos = (x + sprite_col) + ((y + sprite_row) * 64);
 
-				break;
-			}
-			case (0x5000):{
-				if (Arch->v[(opcode & 0x0F00 >> 8)] == Arch->v[(opcode & 0x00F0 >> 4)]){
-					Arch->PC = Arch->PC + 4;
-				} else {
-					Arch->PC = Arch->PC + 2;
-				}
+                            if (Arch->frame_buffer[in_screen_pos] == 1) {
+                                Arch->v[0xF] = 1;
+                            }
+                            Arch->frame_buffer[in_screen_pos] ^= 1;
+                        }
+                    }
+                }
+                draw_flag = 1;
+                Arch->PC += 2;
+                break;
+            }
+            case 0xE000: {
+                uint8_t key_val = Arch->v[(opcode & 0x0F00) >> 8] & 0x0F;
+                switch (opcode & 0x00FF) {
+                    case 0x009E: {
+                        Arch->PC += (keys[key_val] != 0) ? 4 : 2;
+                        break;
+                    }
+                    case 0x00A1: {
+                        Arch->PC += (keys[key_val] == 0) ? 4 : 2;
+                        break;
+                    }
+                }
+                break;
+            }
+            case 0xF000: {
+                uint8_t x = (opcode & 0x0F00) >> 8;
 
-				break;
-			}
-			case (0x6000):{
-				Arch->v[(opcode & 0x0F00) >> 8] = (opcode & 0x00FF);
-				Arch->PC = Arch->PC + 2;
-
-				break;
-			} 
-			case (0x7000):{
-				Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] + (opcode & 0x00FF);
-				Arch->PC = Arch->PC + 2;
-
-				break;
-			}
-			case (0x8000):{
-				switch(opcode & 0x000F){
-					case (0x0000):{
-						Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x00F0) >> 4];
-						Arch->PC = Arch->PC + 2;
-
-						break;
-					}
-					case (0x0001):{
-						Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] | Arch->v[(opcode & 0x00F0) >> 4];	
-						Arch->PC = Arch->PC + 2;
-
-						break;					
-					}
-					case (0x0002):{
-						Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] & Arch->v[(opcode & 0x00F0) >> 4];	
-						Arch->PC = Arch->PC + 2;
-
-						break;					
-					}
-					case (0x0003):{
-						Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] ^ Arch->v[(opcode & 0x00F0) >> 4];	
-						Arch->PC = Arch->PC + 2;
-
-						break;					
-					}
-					case (0x0004):{
-						uint16_t sum = Arch->v[(opcode & 0x0F00) >> 8] + Arch->v[(opcode & 0x00F0) >> 4];
-						Arch->v[0xF] = (sum > 0xFF) ? 0 : 1;
-						Arch->v[(opcode & 0x0F00) >> 8] = sum & Arch->v[0xF];
-						Arch->PC = Arch->PC + 2;
-
-						break;
-					}
-					case (0x0005):{
-						uint16_t diff = Arch->v[(opcode & 0x0F00) >> 8] - Arch->v[(opcode & 0x00F0) >> 4];
-						Arch->v[0xF] = (diff < 0) ? 0 : 1;
-						Arch->PC = Arch->PC + 2;
-
-						break;
-					}
-					case (0x0006):{
-						Arch->v[0xF] = Arch->v[(opcode & 0x0F00) >> 8] & 1;
-						Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] >> 1;
-						Arch->PC = Arch->PC + 2;
-
-						break;
-					}
-					case (0x0007):{
-						uint16_t diff = Arch->v[(opcode & 0x00F0) >> 4] - Arch->v[(opcode & 0x0F00) >> 8];	
-						Arch->v[0xF] = (diff < 0) ? 0 : 1;	
-						Arch->PC = Arch->PC + 2;
-							
-						break;							
-					}
-					case (0x000E):{
-						Arch->v[0xF] = Arch->v[(opcode & 0x0F00) >> 8] >> 7;
-						Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] << 1;
-						Arch->PC = Arch->PC + 2;	
-						
-						break;					
-					}
-				}
-			}
-			case (0x9000):{
-				if ((opcode & 0x000F) == 0x0000){
-					if (Arch->v[(opcode & 0x0F00 >> 8)] != Arch->v[(opcode & 0x00F0 >> 4)]){
-						Arch->PC = Arch->PC + 4;
-					} else {
-						Arch->PC = Arch->PC + 2;
-					}
-
-					break;				
-				} else {
-					printf("\nUnknown opcode !");
-				}
-
-				break;
-			}
-			case (0xA000):{
-				Arch->IR = (opcode & 0x0FFF);
-				Arch->PC = Arch->PC + 2; 
-
-				break;
-			} 
-			case (0xB000):{
-				Arch->PC = (opcode & 0x0FFF) + Arch->v[0x0];
-
-				break;
-			}
-			case (0xC000):{
-				srand(time(NULL));
-
-				uint8_t random_byte = rand() & 0xFF;
-				Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] & random_byte;
-				Arch->PC = Arch->PC + 2;
-
-				break;
-			}
-			case (0xD000):{
-				uint8_t x = Arch->v[(opcode & 0x0F00) >> 8], y = Arch->v[(opcode & 0x00F0) >> 4];
-				uint8_t height = (opcode & 0x000F);
-				uint8_t pixel;				
-
-				Arch->v[0xF] = 0;
-
-				for(int sprite_row = 0; sprite_row < height; sprite_row++){
-					pixel = Arch->main_memory[Arch->IR + sprite_row];
-
-					for(int sprite_col = 0; sprite_col < 8; sprite_col++){
-						if (pixel & (0x80 >> sprite_col) != 0){
-							int in_screen_x = (x & 63) + sprite_col;
-							int in_screen_y = (y & 31) + sprite_row;
-
-							if (in_screen_x >= 64 || in_screen_y >= 32) continue;
-
-							int in_screen_pos = in_screen_x + (in_screen_y * 64);
-
-							if (Arch->frame_buffer[in_screen_pos] != 0) Arch->v[0xF] = 1;
-
-							Arch->frame_buffer[in_screen_pos] = Arch->frame_buffer[in_screen_pos] ^ 1;
-						}
-					}
-				}
-				draw_flag = 1;
-				Arch->PC = Arch->PC + 2;
-
-				break;
-			}
-			case (0xE000):{
-				switch (opcode & 0x00FF){
-					case (0x009E):{
-						if (keys[Arch->v[(opcode & 0x0F00) >> 8]] != 0){
-							Arch->PC = Arch->PC + 4;
-						} else {
-							Arch->PC = Arch->PC + 2;
-						}
-
-						break;
-					}	
-					case (0x00A1):{
-						if (keys[Arch->v[(opcode & 0x0F00) >> 8]] == 0){
-							Arch->PC = Arch->PC + 4;
-						} else {
-							Arch->PC = Arch->PC + 2;
-						}
-
-						break;
-					}
-					default:{
-						printf("\nUnknown opcode !");
-
-						break;
-					}
-				}
-			} 
-			case (0xF000):{
-				switch (opcode & 0x00FF){
-					case (0x0007):{
-						Arch->v[(opcode & 0x0F00) >> 8] = Arch->delay_timer;
-						Arch->PC = Arch->PC + 2;
-
-						break;
-					}
-					case (0x000A):{
-						for(int i = 0; i < 16; i++0){
-							if (keys[i] != 0){
-								Arch->v[(opcode & 0x0F00) >> 8] = keys[i];
-
-								break;
-							}
-						}
-						Arch->PC = Arch->PC + 2;
-
-						break;
-					}
-					case (0x0015):{
-						Arch->delay_timer = Arch->v[(opcode & 0x0F00) >> 8];
-						Arch->PC = Arch->PC + 2;
-
-						break;						
-					}
-					case (0x0018):{
-						Arch->sound_timer = Arch->v[(opcode & 0x0F00) >> 8];
-						Arch->PC = Arch->PC + 2;
-
-						break;										
-					}
-					case (0x001E):{
-						Arch->IR = Arch->IR + Arch->v[(opcode & 0x0F00) >> 8];		
-						Arch->PC = Arch->PC + 2;
-
-						break;	
-					}
-					case (0x0029):{
-						Arch->IR = Arch->v[(opcode & 0x0F00) >> 8] * 5;
-						Arch->PC = Arch->PC + 2;
-
-						break;		
-					}
-					case (0x0033):{
-						uint8_t bin_to_dec = Arch->v[(opcode & 0x0F00) >> 8];
-						Arch->main_memory[Arch->IR] = bin_to_dec / 100;
-						Arch->main_memory[Arch->IR + 1] = (bin_to_dec / 10) % 10; 
- 						Arch->main_memory[Arch->IR + 2]	= bin_to_dec % 10;
- 						Arch->PC = Arch->PC + 2;
-
- 						break;
-					}
-					case (0x0055):{
-						for(int i = 0; i < (opcode & 0x0F00); i++){
-							Arch->main_memory[Arch->IR + i] = Arch->v[i];
-						}
-						Arch->PC = Arch->PC + 2;
-
-						break;
-					}
-					case (0x0065):{
-						for(int i = 0; i < (opcode & 0x0F00); i++){
-							Arch->v[i] = Arch->main_memory[Arch->IR + i];
-						}
-						Arch->PC = Arch->PC + 2;
-
-						break;						
-					}
-					default:{
-						printf("\nUnknown opcode !");
-
-						break;
-					}
-				}
-			}
-		}
-	} else {
-		printf("\nOut of RAM !");
-	}
+                switch (opcode & 0x00FF) {
+                    case 0x0007: {
+                        Arch->v[x] = Arch->delay_timer;
+                        Arch->PC += 2;
+                        break;
+                    }
+                    case 0x000A: {
+                        int key_pressed = 0;
+                        for (int i = 0; i < 16; i++) {
+                            if (keys[i] != 0) {
+                                Arch->v[x] = i;
+                                key_pressed = 1;
+                                break;
+                            }
+                        }
+                        if (key_pressed) {
+                            Arch->PC += 2;
+                        }
+                        break;
+                    }
+                    case 0x0015: {
+                        Arch->delay_timer = Arch->v[x];
+                        Arch->PC += 2;
+                        break;
+                    }
+                    case 0x0018: {
+                        Arch->sound_timer = Arch->v[x];
+                        Arch->PC += 2;
+                        break;
+                    }
+                    case 0x001E: {
+                        Arch->IR += Arch->v[x];
+                        Arch->PC += 2;
+                        break;
+                    }
+                    case 0x0029: {
+                        Arch->IR = (Arch->v[x] & 0x0F) * 5;
+                        Arch->PC += 2;
+                        break;
+                    }
+                    case 0x0033: {
+                        uint8_t val = Arch->v[x];
+                        Arch->main_memory[Arch->IR]     = val / 100;
+                        Arch->main_memory[Arch->IR + 1] = (val / 10) % 10;
+                        Arch->main_memory[Arch->IR + 2] = val % 10;
+                        Arch->PC += 2;
+                        break;
+                    }
+                    case 0x0055: {
+                        for (int i = 0; i <= x; i++) {
+                            Arch->main_memory[Arch->IR + i] = Arch->v[i];
+                        }
+                        Arch->PC += 2;
+                        break;
+                    }
+                    case 0x0065: {
+                        for (int i = 0; i <= x; i++) {
+                            Arch->v[i] = Arch->main_memory[Arch->IR + i];
+                        }
+                        Arch->PC += 2;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    } else {
+        printf("\nProgram counter out of bounds!");
+    }
 }
 
-void handle_timers(){
-	if (Arch->delay_timer > 0){
-		Arch->delay_timer = Arch->delay_timer - 1;
-	}
-	if (Arch->sound_timer > 1){
-		Arch->sound_timer = Arch->sound_timer - 1;
-	} else {
-		printf("\nBEEP !");
-	}
+void handle_timers(void) {
+    if (Arch->delay_timer > 0) {
+        Arch->delay_timer--;
+    }
+    if (Arch->sound_timer > 0) {
+        if (Arch->sound_timer == 1) {
+            // Trigger audio output or beep here
+        }
+        Arch->sound_timer--;
+    }
 }
