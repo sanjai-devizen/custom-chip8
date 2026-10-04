@@ -16,6 +16,7 @@ typedef struct {
 } architecture;
 
 void initialize_chip8(char *filename);
-void emulate_cycle();
+void emulate_cycle(void);
+void handle_timers(void);
 
 #endif 

@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "defs.h"
 
 uint16_t opcode;
@@ -81,7 +82,7 @@ void initialize_chip8(char *filename){
 }
 
 void emulate_cycle(){
-	if (Arch->PC != 0x200 + rm){
+	if (Arch->PC != 0x200 + rom_size){
 		opcode = (Arch->main_memory[Arch->PC] << 8) | (Arch->main_memory[Arch->PC + 1]);
 		printf("\nAddr [0x%03X]: 0x%04X", Arch->PC, opcode);
 
@@ -116,7 +117,7 @@ void emulate_cycle(){
 				break;
 			}
 			case (0x2000):{
-				Arch->stack[Arch->SP] = PC;
+				Arch->stack[Arch->SP] = Arch->PC;
 				Arch->SP = Arch->SP + 1;
 				Arch->PC = (opcode & 0x0FFF);
 
@@ -189,38 +190,209 @@ void emulate_cycle(){
 					}
 					case (0x0004):{
 						uint16_t sum = Arch->v[(opcode & 0x0F00) >> 8] + Arch->v[(opcode & 0x00F0) >> 4];
-						Arch->v[0xF] = (sum > 0xFF) 0 : 1;
+						Arch->v[0xF] = (sum > 0xFF) ? 0 : 1;
 						Arch->v[(opcode & 0x0F00) >> 8] = sum & Arch->v[0xF];
 						Arch->PC = Arch->PC + 2;
 
 						break;
 					}
 					case (0x0005):{
-						
+						uint16_t diff = Arch->v[(opcode & 0x0F00) >> 8] - Arch->v[(opcode & 0x00F0) >> 4];
+						Arch->v[0xF] = (diff < 0) ? 0 : 1;
+						Arch->PC = Arch->PC + 2;
+
 						break;
+					}
+					case (0x0006):{
+						Arch->v[0xF] = Arch->v[(opcode & 0x0F00) >> 8] & 1;
+						Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] >> 1;
+						Arch->PC = Arch->PC + 2;
+
+						break;
+					}
+					case (0x0007):{
+						uint16_t diff = Arch->v[(opcode & 0x00F0) >> 4] - Arch->v[(opcode & 0x0F00) >> 8];	
+						Arch->v[0xF] = (diff < 0) ? 0 : 1;	
+						Arch->PC = Arch->PC + 2;
+							
+						break;							
+					}
+					case (0x000E):{
+						Arch->v[0xF] = Arch->v[(opcode & 0x0F00) >> 8] >> 7;
+						Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] << 1;
+						Arch->PC = Arch->PC + 2;	
+						
+						break;					
 					}
 				}
 			}
 			case (0x9000):{
+				if ((opcode & 0x000F) == 0x0000){
+					if (Arch->v[(opcode & 0x0F00 >> 8)] != Arch->v[(opcode & 0x00F0 >> 4)]){
+						Arch->PC = Arch->PC + 4;
+					} else {
+						Arch->PC = Arch->PC + 2;
+					}
 
+					break;				
+				} else {
+					printf("\nUnknown opcode !");
+				}
+
+				break;
 			}
 			case (0xA000):{
+				Arch->IR = (opcode & 0x0FFF);
+				Arch->PC = Arch->PC + 2; 
 
+				break;
 			} 
 			case (0xB000):{
-				
+				Arch->PC = (opcode & 0x0FFF) + Arch->v[0x0];
+
+				break;
 			}
 			case (0xC000):{
+				srand(time(NULL));
 
+				uint8_t random_byte = rand() & 0xFF;
+				Arch->v[(opcode & 0x0F00) >> 8] = Arch->v[(opcode & 0x0F00) >> 8] & random_byte;
+				Arch->PC = Arch->PC + 2;
+
+				break;
 			}
 			case (0xD000):{
+				uint8_t x = Arch->v[(opcode & 0x0F00) >> 8], y = Arch->v[(opcode & 0x00F0) >> 4];
+				uint8_t height = (opcode & 0x000F);
+				uint8_t pixel;				
 
+				Arch->v[0xF] = 0;
+
+				for(int sprite_row = 0; sprite_row < height; sprite_row++){
+					pixel = Arch->main_memory[Arch->IR + sprite_row];
+
+					for(int sprite_col = 0; sprite_col < 8; sprite_col++){
+						if (pixel & (0x80 >> sprite_col) != 0){
+							int in_screen_x = (x & 63) + sprite_col;
+							int in_screen_y = (y & 31) + sprite_row;
+
+							if (in_screen_x >= 64 || in_screen_y >= 32) continue;
+
+							int in_screen_pos = in_screen_x + (in_screen_y * 64);
+
+							if (Arch->frame_buffer[in_screen_pos] != 0) Arch->v[0xF] = 1;
+
+							Arch->frame_buffer[in_screen_pos] = Arch->frame_buffer[in_screen_pos] ^ 1;
+						}
+					}
+				}
+				draw_flag = 1;
+				Arch->PC = Arch->PC + 2;
+
+				break;
 			}
 			case (0xE000):{
+				switch (opcode & 0x00FF){
+					case (0x009E):{
+						if (keys[Arch->v[(opcode & 0x0F00) >> 8]] != 0){
+							Arch->PC = Arch->PC + 4;
+						} else {
+							Arch->PC = Arch->PC + 2;
+						}
 
+						break;
+					}	
+					case (0x00A1):{
+						if (keys[Arch->v[(opcode & 0x0F00) >> 8]] == 0){
+							Arch->PC = Arch->PC + 4;
+						} else {
+							Arch->PC = Arch->PC + 2;
+						}
+
+						break;
+					}
+					default:{
+						printf("\nUnknown opcode !");
+
+						break;
+					}
+				}
 			} 
 			case (0xF000):{
-				
+				switch (opcode & 0x00FF){
+					case (0x0007):{
+						Arch->v[(opcode & 0x0F00) >> 8] = Arch->delay_timer;
+						Arch->PC = Arch->PC + 2;
+
+						break;
+					}
+					case (0x000A):{
+						for(int i = 0; i < 16; i++0){
+							if (keys[i] != 0){
+								Arch->v[(opcode & 0x0F00) >> 8] = keys[i];
+
+								break;
+							}
+						}
+						Arch->PC = Arch->PC + 2;
+
+						break;
+					}
+					case (0x0015):{
+						Arch->delay_timer = Arch->v[(opcode & 0x0F00) >> 8];
+						Arch->PC = Arch->PC + 2;
+
+						break;						
+					}
+					case (0x0018):{
+						Arch->sound_timer = Arch->v[(opcode & 0x0F00) >> 8];
+						Arch->PC = Arch->PC + 2;
+
+						break;										
+					}
+					case (0x001E):{
+						Arch->IR = Arch->IR + Arch->v[(opcode & 0x0F00) >> 8];		
+						Arch->PC = Arch->PC + 2;
+
+						break;	
+					}
+					case (0x0029):{
+						Arch->IR = Arch->v[(opcode & 0x0F00) >> 8] * 5;
+						Arch->PC = Arch->PC + 2;
+
+						break;		
+					}
+					case (0x0033):{
+						uint8_t bin_to_dec = Arch->v[(opcode & 0x0F00) >> 8];
+						Arch->main_memory[Arch->IR] = bin_to_dec / 100;
+						Arch->main_memory[Arch->IR + 1] = (bin_to_dec / 10) % 10; 
+ 						Arch->main_memory[Arch->IR + 2]	= bin_to_dec % 10;
+ 						Arch->PC = Arch->PC + 2;
+
+ 						break;
+					}
+					case (0x0055):{
+						for(int i = 0; i < (opcode & 0x0F00); i++){
+							Arch->main_memory[Arch->IR + i] = Arch->v[i];
+						}
+						Arch->PC = Arch->PC + 2;
+
+						break;
+					}
+					case (0x0065):{
+						for(int i = 0; i < (opcode & 0x0F00); i++){
+							Arch->v[i] = Arch->main_memory[Arch->IR + i];
+						}
+						Arch->PC = Arch->PC + 2;
+
+						break;						
+					}
+					default:{
+						printf("\nUnknown opcode !");
+
+						break;
+					}
+				}
 			}
 		}
 	} else {
@@ -229,5 +401,12 @@ void emulate_cycle(){
 }
 
 void handle_timers(){
-
+	if (Arch->delay_timer > 0){
+		Arch->delay_timer = Arch->delay_timer - 1;
+	}
+	if (Arch->sound_timer > 1){
+		Arch->sound_timer = Arch->sound_timer - 1;
+	} else {
+		printf("\nBEEP !");
+	}
 }
