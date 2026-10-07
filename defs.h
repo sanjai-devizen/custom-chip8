@@ -3,6 +3,7 @@
 #ifndef CHIP8_H
 #define CHIP8_H
 
+//Core Chip8 Hardware Implementation
 typedef struct {
 	uint8_t main_memory[4096];
 	uint8_t v[16];
