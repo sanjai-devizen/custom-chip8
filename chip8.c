@@ -355,7 +355,8 @@ void handle_timers(void) {
     }
     if (Arch->sound_timer > 0) {
         if (Arch->sound_timer == 1) {
-            // Trigger audio output or beep here
+           //BEEP !
+            printf("\nBEEP !");
         }
         Arch->sound_timer--;
     }
